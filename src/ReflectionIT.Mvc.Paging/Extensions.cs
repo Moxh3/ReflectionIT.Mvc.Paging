@@ -119,5 +119,87 @@ namespace ReflectionIT.Mvc.Paging {
             configureOptions(PagingOptions.Current);
         }
 
+        private static IHtmlContent MetaDataFor<TModel, TValue>(this IHtmlHelper<PagingList<TModel>> html, Expression<Func<TModel, TValue>> expression, Func<ModelMetadata, string> property) where TModel : class
+        {
+            if (html == null) throw new ArgumentNullException(nameof(html));
+            if (expression == null) throw new ArgumentNullException(nameof(expression));
+
+            ModelExpressionProvider modelExpressionProvider = (ModelExpressionProvider)html.ViewContext.HttpContext.RequestServices.GetService(typeof(IModelExpressionProvider));
+            var modelMetadata = GetModelMetadata(modelExpressionProvider, new ViewDataDictionary<TModel>(html.ViewData, model: null), expression);
+
+            return new HtmlString(property(modelMetadata));
+        }
+        
+        private static ModelMetadata GetModelMetadata<TModel, TValue>(ModelExpressionProvider modelExpressionProvider, ViewDataDictionary<TModel> viewData, Expression<Func<TModel, TValue>> expression) 
+        {
+            var modelExpression = modelExpressionProvider.CreateModelExpression(viewData, expression);
+            if (modelExpression == null) throw new InvalidOperationException($"Failed to get model expression for {modelExpressionProvider.GetExpressionText(expression)}");
+
+            return modelExpression.Metadata;
+        }
+        
+        private static string GenerateShortName(ModelMetadata modelMetadata)
+        {
+            if (modelMetadata != null)
+            {
+                ModelBinding.Metadata.DefaultModelMetadata defaultMetadata = (ModelBinding.Metadata.DefaultModelMetadata)modelMetadata;
+                if (defaultMetadata != null)
+                {
+                    var displayAttribute = defaultMetadata.Attributes.Attributes
+                        .OfType<DisplayAttribute>()
+                        .FirstOrDefault();
+                    if (displayAttribute != null)
+                    {
+                        return displayAttribute.ShortName ?? modelMetadata.DisplayName ?? modelMetadata.Name;
+                    }
+                }
+                //Return a default value if the property doesn't have a DisplayAttribute
+                return modelMetadata.DisplayName ?? modelMetadata.Name;
+            }
+            else
+            {
+                throw new ArgumentNullException(nameof(modelMetadata));
+            }
+        }
+        
+        public static IHtmlContent ShortNameFor<TModel, TValue>(this IHtmlHelper<PagingList<TModel>> html, Expression<Func<TModel, TValue>> expression) where TModel : class
+        {
+            return html.MetaDataFor(expression, m =>
+            {
+                return GenerateShortName(m);
+            });
+        }
+        
+        private static string ShortNameForInnerType<TModel, TValue>(this IHtmlHelper<PagingList<TModel>> html, Expression<Func<TModel, TValue>> expression) where TModel : class
+        {
+            if (expression == null)
+            {
+                throw new ArgumentNullException(nameof(expression));
+            }                    
+
+            ModelExpressionProvider modelExpressionProvider = (ModelExpressionProvider)html.ViewContext.HttpContext.RequestServices.GetService(typeof(IModelExpressionProvider));
+            var modelExpression = modelExpressionProvider.CreateModelExpression(new ViewDataDictionary<TModel>(html.ViewData, model: null), expression);
+
+            return GenerateShortName(modelExpression.ModelExplorer.Metadata);
+        }
+    
+        public static IHtmlContent SortableShortNameFor<TModel, TValue>(this IHtmlHelper<PagingList<TModel>> html, Expression<Func<TModel, TValue>> expression, string sortColumn) where TModel : class
+        {
+            var bldr = new HtmlContentBuilder();
+            bldr.AppendHtml(html.ActionLink(html.ShortNameForInnerType(expression), html.ViewData.Model.Action, html.ViewData.Model.GetRouteValueForSort(sortColumn)));
+            IPagingList pagingList = html.ViewData.Model;
+
+            if (pagingList.SortExpression == sortColumn || "-" + pagingList.SortExpression == sortColumn || pagingList.SortExpression == "-" + sortColumn)
+            {
+                bldr.AppendHtml(pagingList.SortExpression.StartsWith("-") ? PagingOptions.Current.HtmlIndicatorUp : PagingOptions.Current.HtmlIndicatorDown);
+            }
+            return bldr;
+        }
+
+        public static IHtmlContent SortableShortNameFor<TModel, TValue>(this IHtmlHelper<PagingList<TModel>> html, Expression<Func<TModel, TValue>> expression) where TModel : class
+        {
+            var member = (expression.Body as MemberExpression).Member;
+            return SortableShortNameFor(html, expression, member.Name);
+        }
     }
 }
